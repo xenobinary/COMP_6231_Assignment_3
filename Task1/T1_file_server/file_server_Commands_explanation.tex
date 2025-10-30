@@ -1,0 +1,67 @@
+\documentclass{article}
+
+\usepackage[letterpaper, margin=0.9in]{geometry}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{fancyhdr}
+\usepackage{multicol}
+\usepackage{graphicx}
+\usepackage{enumitem}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{COMP 6231 Assignment 3}
+\fancyhead[R]{Fall 2025}
+\fancyfoot[C]{\thepage}
+
+\title{COMP 6231 Assignment 3}
+\author{Qiang Xue - 40300671, Yicheng Cai, Yikai Chen, Yifan Wu, Alexander Sutherland}
+
+\begin{document}
+\maketitle
+\section*{Task 1: }
+\subsection*{File Server Commands Explanation}
+\begin{enumerate}
+    \item \textbf{Docker image creation:} 
+    \begin{itemize}
+        \item \textbf{Client:} Navigate to the \texttt{Task1/client} directory and build the Docker image for the client using the command:
+        \begin{verbatim}
+        docker build --tag task1_client .
+        \end{verbatim}
+        This command creates a Docker image named \texttt{task1\_client} based on the instructions in the \texttt{Dockerfile} located in the current directory. The content of the \texttt{Dockerfile} is as follows:
+        \begin{verbatim}
+        FROM ozxx33/fileserver-base
+        WORKDIR /usr/src/app
+        COPY . .
+        CMD ["python", "./client.py"]
+        \end{verbatim}
+        \item \textbf{Server:} Navigate to the \texttt{Task1/server} directory and build the Docker image for the server using the command:
+        \begin{verbatim}
+        docker build --tag task1_server .
+        \end{verbatim}
+        This command creates a Docker image named \texttt{task1\_server} based on the instructions in the \texttt{Dockerfile} located in the current directory. The content of the \texttt{Dockerfile} is as follows:
+        \begin{verbatim}
+        FROM ozxx33/fileserver-base
+        WORKDIR /usr/src/app
+        COPY ./server.py .
+        EXPOSE 65432
+        CMD ["python", "./server.py"]
+        \end{verbatim}
+    \end{itemize}
+    
+    \item \textbf{Running Docker containers:}
+    \begin{itemize}
+        \item \textbf{Server:} To run the server container, use the command:
+        \begin{verbatim}
+        docker run -it --name socket_server --network host task1_server
+        \end{verbatim}
+        This command starts a new container named \texttt{socket\_server} in interactive mode from the \texttt{task1\_server} image. The \texttt{--network host} option allows the container to share the host's network stack, enabling it to listen for incoming connections on the host's network interfaces. The \texttt{-it} option allows for interactive terminal access to the server container.
+        \item \textbf{Client:} To run the client container, use the command:
+        \begin{verbatim}
+        docker run -it --name socket_client --network host task1_client
+        \end{verbatim}
+        This command starts a new container named \texttt{socket\_client} from the \texttt{task1\_client} image. The \texttt{--network host} option allows the client container to share the host's network stack, enabling it to communicate with the server running on the host machine. The \texttt{-it} option allows for interactive terminal access to the client container.
+    \end{itemize} 
+\end{enumerate}
+
+\end{document}
