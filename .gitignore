@@ -1,0 +1,40 @@
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Additional LaTeX intermediate files
+*.bbl
+*.blg
+*.lof
+*.lot
+*.nav
+*.snm
+*.xdv
+*.run.xml
+
+# Generated output (uncomment if you don't want compiled PDFs tracked)
+# *.pdf
+
+# Editor/temp files
+*~
+#*#
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Python caches / virtualenvs
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+env/
+
+# Test caches
+.pytest_cache/
