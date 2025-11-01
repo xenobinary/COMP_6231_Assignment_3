@@ -8,6 +8,39 @@ class Client:
         self.client_socket = None
         self.eof_token = None
 
+    def _recv_exact(self, active_socket: socket.socket, n: int) -> bytearray:
+        """Receive exactly n bytes from the socket, or raise if connection closes early."""
+        data = bytearray()
+        while len(data) < n:
+            packet = active_socket.recv(n - len(data))
+            if not packet:
+                raise ConnectionError("Socket closed before receiving expected bytes")
+            data.extend(packet)
+        return data
+
+    def _read_frame_with_remainder(self, active_socket: socket.socket, buffer_size: int, eof_token) -> tuple[bytearray, bytearray]:
+        """Read until the first occurrence of eof_token is found. Return (payload, remainder after token)."""
+        if isinstance(eof_token, (bytes, bytearray, memoryview)):
+            token_bytes = bytes(eof_token)
+        else:
+            token_bytes = str(eof_token).encode('utf-8')
+        buf = bytearray()
+        token_len = len(token_bytes)
+        active_socket.settimeout(10.0)
+        while True:
+            try:
+                chunk = active_socket.recv(buffer_size)
+                if not chunk:
+                    return buf, bytearray()
+                buf.extend(chunk)
+                idx = buf.find(token_bytes)
+                if idx != -1:
+                    payload = buf[:idx]
+                    remainder = buf[idx + token_len:]
+                    return payload, remainder
+            except socket.timeout:
+                continue
+
     def receive_message_ending_with_token(
         self, active_socket, buffer_size, eof_token
     ) -> bytearray:
@@ -56,8 +89,14 @@ class Client:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((host, port))
         print('Connected to server at IP:', host, 'and Port:', port)
-        # Step 2: Receive the EOF token from the server
-        eof_token = client_socket.recv(10)  # Assuming the token is 10 bytes long
+        # Step 2: Receive the EOF token from the server (exact 10 bytes)
+        expected_len = 10
+        eof_token = bytearray()
+        while len(eof_token) < expected_len:
+            chunk = client_socket.recv(expected_len - len(eof_token))
+            if not chunk:
+                raise ConnectionError("Failed to receive full EOF token from server")
+            eof_token.extend(chunk)
         print('Handshake Done. EOF is:', eof_token)
         # Step 3: Receive and display the current working directory from the server
         cwd_info = self.receive_message_ending_with_token(client_socket, 1024, eof_token)
@@ -122,8 +161,12 @@ class Client:
         try:
             with open(file_path, 'rb') as file:
                 file_data = file.read()
+            print(f"[UL] Sending command and size: name={file_path}, size={len(file_data)}")
             client_socket.sendall((command_and_arg + eof_token).encode('utf-8'))
-            client_socket.sendall(file_data + eof_token.encode('utf-8'))
+            # Send length header (token-terminated), then raw bytes
+            client_socket.sendall((str(len(file_data)) + eof_token).encode('utf-8'))
+            client_socket.sendall(file_data)
+            print("[UL] Waiting for server response (cwd info)...")
             response = self.receive_message_ending_with_token(client_socket, 1024, eof_token.encode('utf-8'))
             print(response.decode('utf-8'))
         except Exception as e:
@@ -141,7 +184,19 @@ class Client:
         :param eof_token: a token to indicate the end of the message.
         """
         client_socket.sendall((command_and_arg + eof_token).encode('utf-8'))
-        file_data = self.receive_message_ending_with_token(client_socket, 1024, eof_token.encode('utf-8'))
+        # First, receive the size header (token-terminated), allowing for coalesced file bytes
+        size_bytes, remainder = self._read_frame_with_remainder(client_socket, 1024, eof_token.encode('utf-8'))
+        size_str = size_bytes.decode('utf-8').strip()
+        expected_len = int(size_str)
+        # Then, receive exactly expected_len raw bytes, accounting for any remainder already read
+        received = bytearray(remainder)
+        to_read = expected_len - len(received)
+        if to_read < 0:
+            received = received[:expected_len]
+            to_read = 0
+        if to_read > 0:
+            received.extend(self._recv_exact(client_socket, to_read))
+        file_data = bytes(received)
         file_name = command_and_arg.split(" ", 1)[1].strip()
                 
         try:

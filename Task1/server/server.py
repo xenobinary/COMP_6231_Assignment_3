@@ -12,6 +12,37 @@ class Server:
         self.host = host
         self.port = port
         self.server_socket = None
+    
+    def _recv_exact(self, active_socket: socket.socket, n: int) -> bytearray:
+        """Receive exactly n bytes from the socket, or raise if connection closes early."""
+        data = bytearray()
+        while len(data) < n:
+            packet = active_socket.recv(n - len(data))
+            if not packet:
+                raise ConnectionError("Socket closed before receiving expected bytes")
+            data.extend(packet)
+        return data
+
+    def _read_frame_with_remainder(self, active_socket: socket.socket, buffer_size: int, eof_token):
+        """Read from socket until the first occurrence of eof_token is found anywhere in the stream.
+        Returns a tuple: (payload_without_token, remainder_after_token).
+        This avoids blocking when the next payload starts in the same TCP packet.
+        """
+        token_bytes = eof_token.encode('utf-8') if isinstance(eof_token, str) else eof_token
+        buf = bytearray()
+        token_len = len(token_bytes)
+        while True:
+            chunk = active_socket.recv(buffer_size)
+            if not chunk:
+                # No more data; return whatever we have (no token found)
+                return buf, bytearray()
+            buf.extend(chunk)
+            idx = buf.find(token_bytes)
+            if idx != -1:
+                # Split at first occurrence of token
+                payload = buf[:idx]
+                remainder = buf[idx + token_len:]
+                return payload, remainder
 
     def start(self) -> None:
         """
@@ -156,7 +187,13 @@ class Server:
         # raise NotImplementedError("Your implementation here.")
 
     def handle_ul(
-        self, current_working_directory, file_name, service_socket, eof_token
+        self,
+        current_working_directory,
+        file_name,
+        service_socket,
+        eof_token,
+        expected_len=None,
+        initial_remainder=b"",
     ) -> None:
         """
         Handles the client ul commands. First, it reads the payload, i.e. file content from the client, then creates the
@@ -168,10 +205,37 @@ class Server:
         :param eof_token: a token to indicate the end of the message.
         """
         try:
-            file_path = os.path.join(current_working_directory, file_name)
-            file_data = self.receive_message_ending_with_token(service_socket, 1024, eof_token)
+            # Ensure file is created within server's current directory
+            safe_name = os.path.basename(file_name)
+            file_path = os.path.join(current_working_directory, safe_name)
+            print(f"[UL] Start: name={safe_name}")
+            if expected_len is None:
+                # Backward compatibility: read size header now
+                size_bytes, remainder = self._read_frame_with_remainder(service_socket, 1024, eof_token)
+                size_str = size_bytes.decode('utf-8').strip()
+                expected_len = int(size_str)
+                init_bytes = remainder
+            else:
+                init_bytes = initial_remainder or b""
+            if expected_len < 0:
+                raise ValueError("Invalid file size")
+            print(f"[UL] Size header ok: expected_len={expected_len}, remainder_after_header={len(init_bytes)}")
+
+            # We may have already received part of the file in 'init_bytes'
+            received = bytearray(init_bytes)
+            to_read = expected_len - len(received)
+            if to_read < 0:
+                # More bytes than needed were already read; truncate the extra
+                received = received[:expected_len]
+                to_read = 0
+
+            if to_read > 0:
+                print(f"[UL] Reading exact bytes: to_read={to_read}")
+                received.extend(self._recv_exact(service_socket, to_read))
+
             with open(file_path, 'wb') as f:
-                f.write(file_data)
+                f.write(received)
+            print(f"[UL] Done for {safe_name}: wrote={len(received)} bytes at {file_path}")
         except Exception as e:
             print(f"Error uploading file {file_name}: {e}")
             # service_socket.sendall((eof_token).encode('utf-8'))
@@ -189,10 +253,14 @@ class Server:
         :param eof_token: a token to indicate the end of the message.
         """
         try:
-            file_path = os.path.join(current_working_directory, file_name)
+            # Ensure file path is based on server's cwd
+            safe_name = os.path.basename(file_name)
+            file_path = os.path.join(current_working_directory, safe_name)
             with open(file_path, 'rb') as f:
                 file_data = f.read()
-            service_socket.sendall(file_data + eof_token.encode('utf-8'))
+            # Send size header (token-terminated), then raw file bytes
+            service_socket.sendall((str(len(file_data)) + eof_token).encode('utf-8'))
+            service_socket.sendall(file_data)
         except Exception as e:
             print(f"Error downloading file {file_name}: {e}")
             # service_socket.sendall((eof_token).encode('utf-8'))
@@ -323,6 +391,31 @@ class ClientThread(Thread):
         self.service_socket = service_socket
         self.address = address
         self.eof_token = eof_token
+        # Buffer to hold any bytes read beyond a token-delimited frame
+        self._recv_buffer = bytearray()
+
+    def _read_frame(self) -> bytearray:
+        """Read a token-terminated frame from the socket using an internal buffer.
+        Returns payload without the token. Any bytes after the token stay in the buffer.
+        """
+        token_bytes = self.eof_token.encode('utf-8')
+        token_len = len(token_bytes)
+        # Check if token already in buffer
+        while True:
+            idx = self._recv_buffer.find(token_bytes)
+            if idx != -1:
+                payload = self._recv_buffer[:idx]
+                # keep remainder after token in buffer
+                self._recv_buffer = self._recv_buffer[idx + token_len:]
+                return payload
+            # Need more data
+            chunk = self.service_socket.recv(4096)
+            if not chunk:
+                # Return whatever is left (no token)
+                payload = bytes(self._recv_buffer)
+                self._recv_buffer.clear()
+                return bytearray(payload)
+            self._recv_buffer.extend(chunk)
 
     def run(self):
         print ("Connection from : ", self.address)
@@ -337,9 +430,15 @@ class ClientThread(Thread):
 
             while True:
                 # get the command and arguments and call the corresponding method
-                command_and_arg = self.server_obj.receive_message_ending_with_token(
-                    self.service_socket, 1024, self.eof_token
-                ).decode('utf-8').strip()
+                raw_msg = self._read_frame()
+                try:
+                    command_and_arg = raw_msg.decode('utf-8').strip()
+                except UnicodeDecodeError:
+                    # If decoding fails, we most likely consumed a leftover binary chunk
+                    # (e.g., from an upload). Discard and continue waiting for the next
+                    # proper UTF-8 command instead of crashing.
+                    print(f"Warning: Discarded non-UTF-8 payload of {len(raw_msg)} bytes from {self.address}")
+                    continue
                 print(f"Received command: {command_and_arg} from {self.address}")
                 if not command_and_arg:
                     break  # client disconnected
@@ -354,7 +453,24 @@ class ClientThread(Thread):
                 # Handle ul command
                 elif command_and_arg.startswith("ul "):
                     file_name = command_and_arg[3:].strip()
-                    self.server_obj.handle_ul(current_working_directory, file_name, self.service_socket, self.eof_token)
+                    # Next frame is the size header
+                    size_header = self._read_frame()
+                    try:
+                        expected_len = int(size_header.decode('utf-8').strip())
+                    except Exception:
+                        print(f"Invalid UL size header from {self.address}: {size_header!r}")
+                        expected_len = 0
+                    # Any bytes already in buffer belong to file payload
+                    initial = bytes(self._recv_buffer)
+                    self._recv_buffer.clear()
+                    self.server_obj.handle_ul(
+                        current_working_directory,
+                        file_name,
+                        self.service_socket,
+                        self.eof_token,
+                        expected_len,
+                        initial,
+                    )
                 # Handle dl command
                 elif command_and_arg.startswith("dl "):
                     file_name = command_and_arg[3:].strip()
