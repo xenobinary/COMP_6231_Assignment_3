@@ -1,5 +1,5 @@
 import socket
-
+import os
 
 class Client:
     def __init__(self, host, port):
@@ -298,8 +298,10 @@ class Client:
 
 ## Don't Modify Below ##
 def run_client():
-    HOST = "127.0.0.1"  # The server's hostname or IP address
-    PORT = 65432  # The port used by the server
+    # HOST = "127.0.0.1"  # The server's hostname or IP address
+    # PORT = 65432  # The port used by the server
+    HOST = os.getenv("SERVER_IP", "127.0.0.1")
+    PORT = int(os.getenv("SERVER_PORT", "65432"))
 
     client = Client(HOST, PORT)
     client.start()
