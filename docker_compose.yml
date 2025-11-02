@@ -1,0 +1,34 @@
+services:
+  # Task 2: MPI cluster
+  mpi-head:
+    build:
+      context: ./Task2/master
+      dockerfile: Dockerfile
+    container_name: mpi-head
+    hostname: mpi-head
+    networks:
+      - 6231-net
+    ports:
+      - "2222:22"
+
+  mpi-worker1:
+    build:
+      context: ./Task2/worker
+      dockerfile: Dockerfile
+    container_name: mpi-worker1
+    hostname: mpi-worker1
+    networks:
+      - 6231-net
+
+  mpi-worker2:
+    build:
+      context: ./Task2/worker
+      dockerfile: Dockerfile
+    container_name: mpi-worker2
+    hostname: mpi-worker2
+    networks:
+      - 6231-net
+
+networks:
+  6231-net:
+    external: true
