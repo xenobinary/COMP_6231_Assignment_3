@@ -5,3 +5,6 @@ docker run -d --name mpi-worker2 --hostname mpi-worker2 --network 6231-net -p 22
 docker exec -it mpi-head bash
 
 mpiexec --allow-run-as-root --mca btl_tcp_if_include eth0 --mca oob_tcp_if_include eth0 -n 3 --host mpi-head,mpi-worker1,mpi-worker2 -x PATH_DATASET="/app/Books_rating.csv" python3 q1_t3.py
+
+
+docker swarm join --token SWMTKN-1-1s98jjyar97v56xixj7wh7jf3wlzcdb5oodn9uldsfhdcmocrr-0zaaxsd8m4ml1bpredq1uqfii 192.168.12.3:2377
