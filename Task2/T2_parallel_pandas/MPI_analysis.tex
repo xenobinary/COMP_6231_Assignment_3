@@ -97,22 +97,22 @@ The MPI cluster consists of 11 containers (1 master + 10 workers) distributed ac
 \addplot[color=blue, mark=square, thick] coordinates {
     (4,5.697)(5,9.661)(6,12.017)(7,10.961)(8,15.865)(9,14.445)(10,15.424)
 };
-\addlegendentry{Question 1}
+\addlegendentry{Q1}
     
 \addplot[color=red, mark=triangle, thick] coordinates {
     (4,6.530)(5,9.304)(6,12.348)(7,10.769)(8,13.819)(9,12.109)(10,13.615)
 };
-\addlegendentry{Question 2}
+\addlegendentry{Q2}
     
 \addplot[color=green!60!black, mark=diamond, thick] coordinates {
     (4,8.673)(5,13.038)(6,12.451)(7,10.697)(8,14.295)(9,12.676)(10,13.621)
 };
-\addlegendentry{Question 3}
+\addlegendentry{Q3}
 
 \addplot[color=orange, mark=pentagon, thick] coordinates {
     (4,6.553)(5,10.614)(6,12.431)(7,11.279)(8,13.319)(9,13.091)(10,12.144)
 };
-\addlegendentry{Question 4}
+\addlegendentry{Q4}
 
 \end{axis}
 \end{tikzpicture}
@@ -129,7 +129,7 @@ The MPI cluster consists of 11 containers (1 master + 10 workers) distributed ac
     
     \item \textbf{Resource Contention:} With more than 4 containers, multiple workers on the same physical machine compete for shared resources (CPU cores, memory bandwidth, network interface). This contention, combined with increased MPI communication overhead (scatter, gather, synchronization), severely degrades performance.
     
-    \item \textbf{Question 3 Complexity:} Q3 consistently shows highest execution times across all configurations, suggesting it involves more communication-intensive operations that are particularly sensitive to resource contention and network overhead.
+    \item \textbf{Performance Recovery at 7 Containers:} Interestingly, 7 containers show better performance (10.7-11.3 seconds) compared to 6 and 8 containers, despite having more workers. This suggests that the specific container-to-machine distribution at this configuration achieves better load balancing across physical machines, reducing some resource contention effects.
 \end{itemize}
 
 \section{Conclusions and Lessons Learned}
