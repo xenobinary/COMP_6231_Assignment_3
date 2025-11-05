@@ -1,0 +1,448 @@
+\documentclass[11pt]{article}
+
+\usepackage[letterpaper, margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{fancyhdr}
+\usepackage{multicol}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{float}
+
+% Define custom colors
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codeframe}{RGB}{200,200,200}
+\definecolor{commentcolor}{RGB}{100,100,100}
+\definecolor{keywordcolor}{RGB}{0,0,128}
+\definecolor{sectioncolor}{RGB}{0,51,102}
+
+% Customize section titles
+\titleformat{\section}
+  {\Large\bfseries\color{sectioncolor}}{\thesection}{1em}{}[\titlerule]
+\titleformat{\subsection}
+  {\large\bfseries\color{sectioncolor}}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{sectioncolor}}{\thesubsubsection}{1em}{}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textit{COMP 6231 Assignment 3 - Task 2}}
+\fancyhead[R]{\small\textit{Fall 2025}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% Listing style
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    backgroundcolor=\color{codebg},
+    breaklines=true,
+    frame=single,
+    frameround=tttt,
+    rulecolor=\color{codeframe},
+    language=bash,
+    breakatwhitespace=false,
+    showstringspaces=false,
+    aboveskip=8pt,
+    belowskip=8pt,
+    xleftmargin=10pt,
+    xrightmargin=10pt,
+    framexleftmargin=5pt,
+    framexrightmargin=5pt,
+    numbers=none,
+    commentstyle=\color{commentcolor},
+    keywordstyle=\color{keywordcolor}\bfseries
+}
+
+\title{\textbf{\Large COMP 6231 Assignment 3}\\[0.5em]
+\textbf{\large Task 2: MPI Commands Explanation}}
+\author{
+    \small
+    \begin{tabular}{c}
+        Qiang Xue (40300671) \quad Yicheng Cai (26396283) \quad Yikai Chen (40302669)\\[0.3em]
+        Yifan Wu (40153584) \quad Alexander Sutherland (40321783)
+    \end{tabular}
+}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\section{Overview}
+
+The MPI cluster architecture utilizes Docker Swarm for container orchestration, enabling parallel data processing across multiple containers. The master node distributes dataset rows to worker nodes, which process data in parallel using MPI and pandas, then aggregate final results back to the master.
+
+\section{Node Configuration}
+
+\subsection{Docker Image Build}
+
+\vspace{0.3em}
+\noindent\textbf{Dockerfile Content:}
+\begin{lstlisting}
+FROM python:3.10-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server \
+    openmpi-bin \
+    libopenmpi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir mpi4py
+RUN pip install pandas
+
+RUN mkdir -p /app
+WORKDIR /app
+
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+COPY id_rsa /root/.ssh/
+COPY id_rsa.pub /root/.ssh/
+RUN chmod 600 /root/.ssh/id_rsa && \
+    cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys && \
+    chmod 600 /root/.ssh/authorized_keys
+
+RUN echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config && \
+    echo "    UserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config
+
+ENV PATH_DATASET="/app/Books_rating.csv"
+
+CMD ["/usr/sbin/sshd", "-D"]
+\end{lstlisting}
+
+\noindent\textit{Explanation of Dockerfile Layers:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{FROM python:3.10-slim}: Uses a lightweight Python 3.10 base image
+    \item \texttt{ENV DEBIAN\_FRONTEND=noninteractive}: Prevents apt-get from prompting for user input
+    \item \texttt{RUN apt-get install openssh-server}: Installs SSH server for inter-container communication
+    \item \texttt{RUN apt-get install openmpi-bin libopenmpi-dev}: Installs OpenMPI libraries and binaries for parallel processing
+    \item \texttt{RUN pip install mpi4py}: Installs Python bindings for MPI
+    \item \texttt{RUN pip install pandas}: Installs pandas library for data processing
+    \item \texttt{COPY id\_rsa}: Copies locally generated SSH keys into container for passwordless authentication between containers
+    \item \texttt{chmod 600}: Sets secure permissions on SSH keys
+    \item \texttt{StrictHostKeyChecking no}: Disables SSH host key verification for automatic connection
+    \item \texttt{ENV PATH\_DATASET}: Sets environment variable for dataset location
+    \item \texttt{CMD ["/usr/sbin/sshd", "-D"]}: Starts SSH daemon in foreground
+\end{itemize}
+
+\vspace{0.5em}
+\noindent\textbf{Build MPI Image:}
+\begin{lstlisting}
+docker build -t mpi-node .
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Creates a Docker image named \texttt{mpi-node}. This single image is used for both master and worker nodes, providing a consistent environment across the cluster. The \texttt{-t} flag tags the image, and the \texttt{.} indicates the build context.
+
+\subsection{Generate SSH Keys}
+
+\vspace{0.3em}
+\noindent\textbf{Generate SSH Key Pair:}
+\begin{lstlisting}
+ssh-keygen -t rsa -b 2048 -f id_rsa -N ""
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Generates an RSA SSH key pair locally for passwordless authentication between MPI containers.
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-t rsa}: Specifies RSA as the key type
+    \item \texttt{-b 2048}: Sets key size to 2048 bits
+    \item \texttt{-f id\_rsa}: Names the private key file as \texttt{id\_rsa} (public key automatically named \texttt{id\_rsa.pub})
+    \item \texttt{-N ""}: Sets empty passphrase for automated SSH connections
+\end{itemize}
+
+\noindent This generates two files in the current directory: \texttt{id\_rsa} (private key) and \texttt{id\_rsa.pub} (public key), which will be copied into all containers during the Docker build process.
+
+\subsection{Prepare Required Files}
+
+Place the following files in the same directory:
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Dataset:} \texttt{Books\_rating.csv} - The dataset to be processed
+    \item \textbf{MPI Scripts:} \texttt{q1\_t3.py, q2\_t3.py, q3\_t3.py, q4\_t3.py} - Python scripts for data analysis
+    \item \textbf{SSH Keys:} \texttt{id\_rsa, id\_rsa.pub} - SSH key pair generated in previous step
+\end{itemize}
+
+\subsection{Distribute Image to Worker Nodes}
+
+\vspace{0.3em}
+\noindent\textbf{Save and Transfer Image:}
+\begin{lstlisting}
+# Save the image to a tar file
+docker save -o mpi-node.tar mpi-node
+
+# Transfer to worker machines
+scp mpi-node.tar user@worker-machine:/path/to/directory
+
+# Load on each worker machine
+docker load -i mpi-node.tar
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Since the MPI image is built on the manager node, it must be distributed to all worker machines in the Docker Swarm cluster. The \texttt{docker save} command exports the image to a tar archive, which is then transferred via \texttt{scp} to each worker machine. On each worker, \texttt{docker load} imports the image, making it available for container deployment. This ensures all physical machines have the \texttt{mpi-node} image before launching worker containers.
+
+\subsection{Run Master Container}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Master Node:}
+\begin{lstlisting}
+docker run -d --name mpi-head --hostname mpi-head 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-d}: Runs container in detached mode (background)
+    \item \texttt{--name mpi-head}: Names the container for easy reference
+    \item \texttt{--hostname mpi-head}: Sets hostname for network identification
+    \item \texttt{--network 6231-net}: Connects to the overlay network created in Task 1
+    \item \texttt{-v "\$(pwd):/app:ro"}: Mounts current directory to /app as read-only, sharing dataset and scripts
+    \item \texttt{mpi-node}: Uses the previously built image
+\end{itemize}
+
+\subsection{Run Worker Containers on Master Node}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Worker 1:}
+\begin{lstlisting}
+docker run -d --name mpi-worker1 --hostname mpi-worker1 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 2:}
+\begin{lstlisting}
+docker run -d --name mpi-worker2 --hostname mpi-worker2 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Creates two worker containers on the master physical machine. Each worker has access to the same shared data via the volume mount and can communicate with other nodes via SSH over the overlay network.
+
+\section{Worker Node Configuration}
+
+\subsection{Second Physical Computer - Workers 3, 4, 5}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Worker 3:}
+\begin{lstlisting}
+docker run -d --name mpi-worker3 --hostname mpi-worker3 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 4:}
+\begin{lstlisting}
+docker run -d --name mpi-worker4 --hostname mpi-worker4 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 5:}
+\begin{lstlisting}
+docker run -d --name mpi-worker5 --hostname mpi-worker5 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Workers run on the second physical machine in the cluster. The volume mount path \texttt{\$(pwd)} should contain the same files (dataset and scripts) on this machine.
+
+\subsection{Third Physical Computer - Worker 6}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Worker 6:}
+\begin{lstlisting}
+docker run -d --name mpi-worker6 --hostname mpi-worker6 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Single worker on the third physical machine, demonstrating the flexibility of distributing containers across different physical hosts.
+
+\subsection{Fourth Physical Computer - Workers 7, 8, 9, 10}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Worker 7:}
+\begin{lstlisting}
+docker run -d --name mpi-worker7 --hostname mpi-worker7 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 8:}
+\begin{lstlisting}
+docker run -d --name mpi-worker8 --hostname mpi-worker8 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 9:}
+\begin{lstlisting}
+docker run -d --name mpi-worker9 --hostname mpi-worker9 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Launch Worker 10:}
+\begin{lstlisting}
+docker run -d --name mpi-worker10 --hostname mpi-worker10 
+    --network 6231-net -v "$(pwd):/app:ro" mpi-node
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Four workers on the fourth physical machine, completing the 10-worker setup for scalability testing.
+
+\section{MPI Execution Commands}
+
+\subsection{Access Master Container}
+
+\vspace{0.3em}
+\noindent\textbf{Enter Master Container:}
+\begin{lstlisting}
+docker exec -it mpi-head bash
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Opens an interactive bash shell inside the running mpi-head container. The \texttt{-it} flags enable interactive terminal mode, allowing execution of MPI commands from within the master node.
+
+\section{Launching and Executing MPI Applications}
+
+\subsection{General MPI Launch Command}
+
+\vspace{0.3em}
+\noindent\textbf{Launch Application with MPI:}
+\begin{lstlisting}
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n <processes> 
+    --host <hostlist> -x PATH_DATASET="/app/Books_rating.csv" 
+    python <script.py>
+\end{lstlisting}
+
+\noindent\textit{Explanation:} This command launches MPI applications across the distributed cluster. The parameters control process distribution, network configuration, and environment variables.
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{\texttt{--allow-run-as-root}}: Permits MPI to run as root user (necessary in containers)
+    \item \textbf{\texttt{--mca btl\_tcp\_if\_include eth0}}: Configures MPI to use eth0 network interface for byte transfer layer
+    \item \textbf{\texttt{--mca oob\_tcp\_if\_include eth0}}: Configures MPI to use eth0 for out-of-band communication
+    \item \textbf{\texttt{-n <processes>}}: Specifies the total number of MPI processes to launch (varies from 5 to 11 in experiments)
+    \item \textbf{\texttt{--host <hostlist>}}: Comma-separated list of container hostnames where processes will run
+    \item \textbf{\texttt{-x PATH\_DATASET}}: Exports environment variable to all MPI processes
+    \item \textbf{\texttt{python <script.py>}}: The Python script to execute in parallel (q1\_t3.py, q2\_t3.py, q3\_t3.py, or q4\_t3.py)
+\end{itemize}
+
+\vspace{0.5em}
+\noindent\textbf{Example - Running with 6 Processes:}
+\begin{lstlisting}
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n 6 
+    --host mpi-head,mpi-worker1,mpi-worker2,mpi-worker3,mpi-worker6,mpi-worker9 
+    -x PATH_DATASET="/app/Books_rating.csv" python q1_t3.py
+\end{lstlisting}
+
+\noindent\textit{Explanation:} This example launches 6 MPI processes distributed across 6 containers (master and 5 workers from different physical machines). The dataset is processed in parallel by all 6 processes, with results aggregated on the master node.
+
+\subsection{Executing Different Analysis Scripts}
+
+\vspace{0.3em}
+\noindent\textbf{Execute Analysis Scripts:}
+\begin{lstlisting}
+# Question 1: Top 5 ratings distribution
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n <processes> 
+    --host <hostlist> -x PATH_DATASET="/app/Books_rating.csv" 
+    python q1_t3.py
+
+# Question 2: Maximum positive review
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n <processes> 
+    --host <hostlist> -x PATH_DATASET="/app/Books_rating.csv" 
+    python q2_t3.py
+
+# Question 3: Minimum positive review
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n <processes> 
+    --host <hostlist> -x PATH_DATASET="/app/Books_rating.csv" 
+    python q3_t3.py
+
+# Question 4: Average ratings and reviews
+mpirun --allow-run-as-root --mca btl_tcp_if_include eth0 
+    --mca oob_tcp_if_include eth0 -n <processes> 
+    --host <hostlist> -x PATH_DATASET="/app/Books_rating.csv" 
+    python q4_t3.py
+\end{lstlisting}
+
+\noindent\textit{Explanation:} All scripts are executed using the full mpirun command with MPI parameters. To execute different analyses, simply change the script name in the final parameter (q1\_t3.py, q2\_t3.py, q3\_t3.py, or q4\_t3.py).
+
+\noindent For scalability testing, experiments were conducted with varying container counts (4-10 containers) by adjusting:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{Process count (\texttt{-n})}: Set to match the number of containers (4, 5, 6, 7, 8, 9, or 10 processes)
+    \item \textbf{Host list (\texttt{--host})}: Comma-separated container names to include in execution (e.g., mpi-head,mpi-worker1,mpi-worker2,...)
+\end{itemize}
+
+\section{Network and Storage Configuration}
+
+\subsection{Network Configuration}
+
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Network Type:} Docker overlay network (6231-net)
+    \item \textbf{Communication Protocol:} SSH over TCP/IP, MPI over TCP/IP
+    \item \textbf{Network Interface:} eth0 (configured in MPI commands)
+    \item \textbf{Ports Used:}
+    \begin{itemize}[itemsep=2pt]
+        \item SSH: Port 22 (for inter-container communication)
+        \item MPI: Dynamic ports assigned by OpenMPI
+        \item Docker Swarm: Port 2377 (management), 7946 (node communication), 4789 (overlay network)
+    \end{itemize}
+\end{itemize}
+
+\subsection{Storage Configuration}
+
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Shared Storage:} Each physical machine has its own copy of the dataset and scripts
+    \item \textbf{Volume Mount:} \texttt{-v "\$(pwd):/app:ro"} mounts host directory to container in read-only mode
+    \item \textbf{Dataset Location:} \texttt{/app/Books\_rating.csv} (consistent across all containers)
+    \item \textbf{Results Storage:} Results are aggregated on the master node (mpi-head)
+\end{itemize}
+
+\subsection{Cluster Distribution Summary}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Physical Machine} & \textbf{Containers} & \textbf{Role} \\
+\midrule
+Manager & mpi-head, mpi-worker1, mpi-worker2 & Master + 2 Workers \\
+Worker Computer 1 & mpi-worker3, mpi-worker4, mpi-worker5 & 3 Workers \\
+Worker Computer 2 & mpi-worker6 & 1 Worker \\
+Worker Computer 3 & mpi-worker7, mpi-worker8, mpi-worker9, mpi-worker10 & 4 Workers \\
+\bottomrule
+\end{tabular}
+\caption{Cluster container distribution across physical machines}
+\label{tab:cluster}
+\end{table}
+
+\subsection{Container IP Address Mapping}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Container Name} & \textbf{IP Address} \\
+\midrule
+mpi-head & 10.0.1.76\\
+mpi-worker1 & 10.0.1.78\\
+mpi-worker2 & 10.0.1.79\\
+mpi-worker3 & 10.0.1.72\\
+mpi-worker4 & 10.0.1.74\\
+mpi-worker5 & 10.0.1.75\\
+mpi-worker6 & 10.0.1.80\\
+mpi-worker7 & 10.0.1.85\\
+mpi-worker8 & 10.0.1.84\\
+mpi-worker9 & 10.0.1.65\\
+mpi-worker10 & 10.0.1.67\\
+\bottomrule
+\end{tabular}
+\caption{IP address assignments for all containers in the MPI cluster}
+\label{tab:ipaddress}
+\end{table}
+
+\end{document}
