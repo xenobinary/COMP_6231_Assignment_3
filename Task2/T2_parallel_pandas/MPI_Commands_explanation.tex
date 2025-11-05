@@ -77,6 +77,9 @@
 
 The MPI cluster architecture utilizes Docker Swarm for container orchestration, enabling parallel data processing across multiple containers. The master node distributes dataset rows to worker nodes, which process data in parallel using MPI and pandas, then aggregate final results back to the master.
 
+\vspace{0.5em}
+\noindent\textbf{Prerequisites:} This task assumes that the Docker Swarm cluster and overlay network (6231-net) have been initialized and configured in Task 1. All physical machines should already be joined to the swarm as either manager or worker nodes before proceeding with MPI cluster deployment.
+
 \section{Node Configuration}
 
 \subsection{Docker Image Build}
