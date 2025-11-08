@@ -19,6 +19,7 @@
 # Generated output (uncomment if you don't want compiled PDFs tracked)
 # *.pdf
 *.csv
+.zip
 
 # Editor/temp files
 *~

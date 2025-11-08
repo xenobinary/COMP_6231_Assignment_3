@@ -189,9 +189,13 @@ python server.py
 
 \noindent\textit{Explanation:} Launches the file server application, which listens on \texttt{0.0.0.0:65432} for incoming client connections and organizes received files in client-specific directories.
 
-\section{Client Configuration}
+\section{Client/Worker Configuration}
 
-\subsection{Docker Image Build}
+\noindent\textit{Note:} The following section details the complete workflow for each client in the cluster, from building the Docker image to executing the client application. This section is repeated for each client to demonstrate the independent configuration process on each worker node.
+
+\subsection{Client 1 (First Worker Node)}
+
+\subsubsection{Docker Image Build}
 
 \vspace{0.3em}
 \noindent\textbf{Dockerfile Content:}
@@ -210,112 +214,191 @@ CMD ["python", "./client.py"]
 docker build -t task1_client .
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Creates a Docker image named \texttt{task1\_client}. The Dockerfile copies all files from the current directory (including client.py and test files) and sets environment variables (\texttt{SERVER\_IP} and \texttt{SERVER\_PORT}) for server connection configuration.
+\noindent\textit{Explanation:} Creates a Docker image named \texttt{task1\_client} on the first worker node. The Dockerfile copies all files from the current directory (including client.py and test files) and sets environment variables for server connection configuration.
 
-\subsection{Distribute Client Image}
-
-There are two methods to distribute the client image to worker nodes:
-
-\vspace{0.3em}
-\noindent\textbf{Method 1 - Image Export/Import:}
-\begin{lstlisting}
-# On manager node
-docker save -o task1_client.tar task1_client
-
-# On worker node
-docker load -i task1_client.tar
-\end{lstlisting}
-
-\noindent\textit{Explanation:} The \texttt{docker save} command exports the image to a tar archive file, which can be transferred to worker nodes and loaded using \texttt{docker load}. This method is ideal when nodes lack access to a shared registry.
-
-\vspace{0.5em}
-\noindent\textbf{Method 2 - Build on Each Node:}
-
-\noindent Copy the Dockerfile and necessary files to each worker node and execute the build command locally on each node.
-
-\subsection{Join Swarm from Worker Nodes}
+\subsubsection{Join Docker Swarm}
 
 \vspace{0.3em}
 \noindent\textbf{Join Worker to Swarm:}
 \begin{lstlisting}
-docker swarm join --token <token> <serverip>:2377
+docker swarm join --token <token> 192.168.12.26:2377
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Joins a worker node to the Docker Swarm. The token authenticates the node, while the IP address (<serverip>) and port 2377 specify the manager node's address. Port 2377 is the default Docker Swarm management port.
+\noindent\textit{Explanation:} Joins the first worker node to the Docker Swarm cluster. The token (obtained from the manager node) authenticates the node, while \texttt{192.168.12.26:2377} specifies the manager node's address and Docker Swarm management port.
 
-\subsection{Deploy Client Containers}
-
-\subsubsection{Client 1 (First Worker Node)}
+\subsubsection{Launch Client Container}
 
 \vspace{0.3em}
-\noindent\textbf{Launch Client Container:}
+\noindent\textbf{Run Client Container:}
 \begin{lstlisting}
 docker run -it --rm --name client1 --hostname client1 
     --network 6231-net task1_client bash
 \end{lstlisting}
 
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-it}: Runs container in interactive mode with terminal access
+    \item \texttt{--rm}: Automatically removes the container upon termination
+    \item \texttt{--name client1}: Assigns the container name "client1"
+    \item \texttt{--hostname client1}: Sets hostname for network identification
+    \item \texttt{--network 6231-net}: Connects container to the overlay network
+    \item \texttt{bash}: Opens bash shell for manual command execution
+\end{itemize}
+
 \noindent\textit{Container IP:} \texttt{10.0.1.30}
 
-\vspace{0.5em}
-\noindent\textbf{Execute Client Application:}
+\subsubsection{Execute Client Application}
+
+\vspace{0.3em}
+\noindent\textbf{Run Client Program:}
 \begin{lstlisting}
 python client.py
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Initiates the client application, which connects to the server using hostname resolution via Docker's DNS and transfers files. 
+\noindent\textit{Explanation:} Executes the client application, which connects to the server using hostname resolution via Docker's DNS, creates a \texttt{client1} directory on the server, and transfers files to that directory.
 
-\subsubsection{Client 2 (Second Worker Node)}
+\subsection{Client 2 (Second Worker Node)}
+
+\subsubsection{Docker Image Build}
 
 \vspace{0.3em}
-\noindent\textbf{Launch Client Container:}
+\noindent\textbf{Dockerfile Content:}
+\begin{lstlisting}
+FROM ozxx33/fileserver-base
+WORKDIR /usr/src/app
+COPY . .
+ENV SERVER_IP=server
+ENV SERVER_PORT=65432
+CMD ["python", "./client.py"]
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Build Command:}
+\begin{lstlisting}
+docker build -t task1_client .
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Creates a Docker image named \texttt{task1\_client} on the second worker node. Each worker node builds its own image independently to avoid dependency on image distribution mechanisms.
+
+\subsubsection{Join Docker Swarm}
+
+\vspace{0.3em}
+\noindent\textbf{Join Worker to Swarm:}
+\begin{lstlisting}
+docker swarm join --token <token> 192.168.12.26:2377
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Joins the second worker node to the Docker Swarm cluster using the same token and manager node address as Client 1.
+
+\subsubsection{Launch Client Container}
+
+\vspace{0.3em}
+\noindent\textbf{Run Client Container:}
 \begin{lstlisting}
 docker run -it --rm --name client2 --hostname client2 
     --network 6231-net task1_client bash
 \end{lstlisting}
 
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-it}: Runs container in interactive mode with terminal access
+    \item \texttt{--rm}: Automatically removes the container upon termination
+    \item \texttt{--name client2}: Assigns the container name "client2"
+    \item \texttt{--hostname client2}: Sets unique hostname for network identification
+    \item \texttt{--network 6231-net}: Connects container to the overlay network
+    \item \texttt{bash}: Opens bash shell for manual command execution
+\end{itemize}
+
 \noindent\textit{Container IP:} \texttt{10.0.1.32}
 
-\vspace{0.5em}
-\noindent\textbf{Execute Client Application:}
+\subsubsection{Execute Client Application}
+
+\vspace{0.3em}
+\noindent\textbf{Run Client Program:}
 \begin{lstlisting}
 python client.py
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Operates on a separate worker node with unique hostname.
+\noindent\textit{Explanation:} Executes the client application, which connects to the server, creates a \texttt{client2} directory on the server, and transfers files to that directory.
 
-\subsubsection{Client 3 (Third Worker Node)}
+\subsection{Client 3 (Third Worker Node)}
+
+\subsubsection{Docker Image Build}
 
 \vspace{0.3em}
-\noindent\textbf{Launch Client Container:}
+\noindent\textbf{Dockerfile Content:}
+\begin{lstlisting}
+FROM ozxx33/fileserver-base
+WORKDIR /usr/src/app
+COPY . .
+ENV SERVER_IP=server
+ENV SERVER_PORT=65432
+CMD ["python", "./client.py"]
+\end{lstlisting}
+
+\vspace{0.5em}
+\noindent\textbf{Build Command:}
+\begin{lstlisting}
+docker build -t task1_client .
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Creates a Docker image named \texttt{task1\_client} on the third worker node, completing the image build process for all worker nodes in the cluster.
+
+\subsubsection{Join Docker Swarm}
+
+\vspace{0.3em}
+\noindent\textbf{Join Worker to Swarm:}
+\begin{lstlisting}
+docker swarm join --token <token> 192.168.12.26:2377
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Joins the third worker node to the Docker Swarm cluster using the same token and manager node address.
+
+\subsubsection{Launch Client Container}
+
+\vspace{0.3em}
+\noindent\textbf{Run Client Container:}
 \begin{lstlisting}
 docker run -it --rm --name client3 --hostname client3 
     --network 6231-net task1_client bash
 \end{lstlisting}
 
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-it}: Runs container in interactive mode with terminal access
+    \item \texttt{--rm}: Automatically removes the container upon termination
+    \item \texttt{--name client3}: Assigns the container name "client3"
+    \item \texttt{--hostname client3}: Sets unique hostname for network identification
+    \item \texttt{--network 6231-net}: Connects container to the overlay network
+    \item \texttt{bash}: Opens bash shell for manual command execution
+\end{itemize}
+
 \noindent\textit{Container IP:} \texttt{10.0.1.34}
 
-\vspace{0.5em}
-\noindent\textbf{Execute Client Application:}
+\subsubsection{Execute Client Application}
+
+\vspace{0.3em}
+\noindent\textbf{Run Client Program:}
 \begin{lstlisting}
 python client.py
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Completes the three-client architecture.
+\noindent\textit{Explanation:} Executes the client application, which connects to the server, creates a \texttt{client3} directory on the server, transfers files, and executes commands such as \texttt{wordcount about.txt}.
 
 \section{Network and Storage Configuration}
 
 \subsection{Network Configuration}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
+\begin{tabular}{lllll}
 \toprule
-\textbf{Container} & \textbf{Hostname} & \textbf{IP Address} & \textbf{Port} \\
+\textbf{Container} & \textbf{Hostname} & \textbf{IP Address} & \textbf{Port} & \textbf{Host IP Address} \\
 \midrule
-Server & server & 10.0.1.28 & 65432 \\
-Client 1 & client1 & 10.0.1.30 & Dynamic \\
-Client 2 & client2 & 10.0.1.32 & Dynamic \\
-Client 3 & client3 & 10.0.1.34 & Dynamic \\
+Server & server & 10.0.1.28 & 65432 & 192.168.12.26 \\
+Client 1 & client1 & 10.0.1.30 & Dynamic & 192.168.12.16 \\
+Client 2 & client2 & 10.0.1.32 & Dynamic & 192.168.12.5 \\
+Client 3 & client3 & 10.0.1.34 & Dynamic & 192.168.12.3 \\
 \bottomrule
 \end{tabular}
 \caption{Container network configuration within the overlay network}
@@ -336,7 +419,7 @@ Client 3 & client3 & 10.0.1.34 & Dynamic \\
 
 \begin{figure}[H]
 \centering
-\fbox{\includegraphics[width=0.85\textwidth]{../server/image.png}}
+\fbox{\includegraphics[width=0.85\textwidth]{./image.png}}
 \caption{Server container showing received files organized by client directories}
 \label{fig:server}
 \end{figure}
@@ -345,21 +428,21 @@ Client 3 & client3 & 10.0.1.34 & Dynamic \\
 
 \begin{figure}[H]
 \centering
-\fbox{\includegraphics[width=0.85\textwidth]{../client/client1.png}}
+\fbox{\includegraphics[width=0.85\textwidth]{./client1.png}}
 \caption{Client 1 successfully creating \texttt{client1} directory and sending files to server}
 \label{fig:client1}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\fbox{\includegraphics[width=0.85\textwidth]{../client/client2.png}}
+\fbox{\includegraphics[width=0.85\textwidth]{./client2.png}}
 \caption{Client 2 successfully creating \texttt{client2} directory and sending files to server}
 \label{fig:client2}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\fbox{\includegraphics[width=0.85\textwidth]{../client/client3.png}}
+\fbox{\includegraphics[width=0.85\textwidth]{./client3.png}}
 \caption{Client 3 successfully creating \texttt{client3} directory and sending \texttt{about.txt} files to server and execute \texttt{wordcount about.txt} command}
 \label{fig:client3}
 \end{figure}

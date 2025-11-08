@@ -170,22 +170,15 @@ Place the following files in the same directory:
     \item \textbf{SSH Keys:} \texttt{id\_rsa, id\_rsa.pub} - SSH key pair generated in previous step
 \end{itemize}
 
-\subsection{Distribute Image to Worker Nodes}
+\subsection{Export Image for Distribution}
 
 \vspace{0.3em}
-\noindent\textbf{Save and Transfer Image:}
+\noindent\textbf{Save Image to Tar File:}
 \begin{lstlisting}
-# Save the image to a tar file
 docker save -o mpi-node.tar mpi-node
-
-# Transfer to worker machines
-scp mpi-node.tar user@worker-machine:/path/to/directory
-
-# Load on each worker machine
-docker load -i mpi-node.tar
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Since the MPI image is built on the manager node, it must be distributed to all worker machines in the Docker Swarm cluster. The \texttt{docker save} command exports the image to a tar archive, which is then transferred via \texttt{scp} to each worker machine. On each worker, \texttt{docker load} imports the image, making it available for container deployment. This ensures all physical machines have the \texttt{mpi-node} image before launching worker containers.
+\noindent\textit{Explanation:} Since the MPI image is built on the manager node, it must be distributed to all worker machines in the Docker Swarm cluster. The \texttt{docker save} command exports the image to a tar archive file. The \texttt{-o} flag specifies the output filename, and \texttt{mpi-node} is the image name to export. This tar file will be transferred to each worker machine for loading.
 
 \subsection{Run Master Container}
 
@@ -226,7 +219,49 @@ docker run -d --name mpi-worker2 --hostname mpi-worker2
 
 \section{Worker Node Configuration}
 
+\noindent\textit{Note:} The following section details the complete workflow for each worker physical machine in the cluster, from loading the Docker image to launching worker containers. This section is repeated for each physical worker machine to demonstrate the independent configuration process.
+
 \subsection{Second Physical Computer - Workers 3, 4, 5}
+
+\subsubsection{Load Docker Image}
+
+\vspace{0.3em}
+\noindent\textbf{Transfer Image File (Execute on Master Node):}
+\begin{lstlisting}
+# On master node (192.168.12.26)
+scp mpi-node.tar user@192.168.12.16:~/
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the master node (192.168.12.26).} Transfer the \texttt{mpi-node.tar} file from the manager node to the second physical computer (192.168.12.16) using secure copy (scp). Replace \texttt{user} with the actual username on the worker machine.
+
+\vspace{0.5em}
+\noindent\textbf{Load Image from Tar (Execute on Worker Node):}
+\begin{lstlisting}
+# On worker node (192.168.12.16)
+docker load -i mpi-node.tar
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the second physical computer (192.168.12.16).} Load the Docker image from the tar archive. The \texttt{-i} flag specifies the input file. This makes the \texttt{mpi-node} image available for container deployment on this worker machine.
+
+\subsubsection{Join Docker Swarm (if not already joined)}
+
+\vspace{0.3em}
+\noindent\textbf{Join Worker to Swarm:}
+\begin{lstlisting}
+docker swarm join --token <worker-token> 192.168.12.26:2377
+\end{lstlisting}
+
+\noindent\textit{Explanation:} If this physical machine has not yet joined the Docker Swarm, use this command to join as a worker node. The \texttt{<worker-token>} was obtained from the manager node (via \texttt{docker swarm join-token worker}), and \texttt{192.168.12.26} is the IP address of the manager node.
+
+\subsubsection{Prepare Required Files}
+
+Place the following files in the working directory on this physical machine:
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Dataset:} \texttt{Books\_rating.csv}
+    \item \textbf{MPI Scripts:} \texttt{q1\_t3.py, q2\_t3.py, q3\_t3.py, q4\_t3.py}
+\end{itemize}
+
+\subsubsection{Launch Worker Containers}
 
 \vspace{0.3em}
 \noindent\textbf{Launch Worker 3:}
@@ -235,12 +270,26 @@ docker run -d --name mpi-worker3 --hostname mpi-worker3
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-d}: Runs container in detached mode (background)
+    \item \texttt{--name mpi-worker3}: Names the container for easy reference
+    \item \texttt{--hostname mpi-worker3}: Sets hostname for network identification
+    \item \texttt{--network 6231-net}: Connects to the overlay network
+    \item \texttt{-v "\$(pwd):/app:ro"}: Mounts current directory to /app as read-only, sharing dataset and scripts
+    \item \texttt{mpi-node}: Uses the loaded image
+\end{itemize}
+
+\noindent\textit{Container IP:} \texttt{10.0.1.72}
+
 \vspace{0.5em}
 \noindent\textbf{Launch Worker 4:}
 \begin{lstlisting}
 docker run -d --name mpi-worker4 --hostname mpi-worker4 
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
+
+\noindent\textit{Container IP:} \texttt{10.0.1.74}
 
 \vspace{0.5em}
 \noindent\textbf{Launch Worker 5:}
@@ -249,9 +298,52 @@ docker run -d --name mpi-worker5 --hostname mpi-worker5
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Workers run on the second physical machine in the cluster. The volume mount path \texttt{\$(pwd)} should contain the same files (dataset and scripts) on this machine.
+\noindent\textit{Container IP:} \texttt{10.0.1.75}
+
+\vspace{0.5em}
+\noindent\textit{Explanation:} Three worker containers are launched on the second physical machine. Each container connects to the overlay network and has access to the dataset and scripts via the volume mount.
 
 \subsection{Third Physical Computer - Worker 6}
+
+\subsubsection{Load Docker Image}
+
+\vspace{0.3em}
+\noindent\textbf{Transfer Image File (Execute on Master Node):}
+\begin{lstlisting}
+# On master node (192.168.12.26)
+scp mpi-node.tar user@192.168.12.5:~/
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the master node (192.168.12.26).} Transfer the \texttt{mpi-node.tar} file from the manager node to the third physical computer (192.168.12.5).
+
+\vspace{0.5em}
+\noindent\textbf{Load Image from Tar (Execute on Worker Node):}
+\begin{lstlisting}
+# On worker node (192.168.12.5)
+docker load -i mpi-node.tar
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the third physical computer (192.168.12.5).} Load the Docker image from the tar archive.
+
+\subsubsection{Join Docker Swarm (if not already joined)}
+
+\vspace{0.3em}
+\noindent\textbf{Join Worker to Swarm:}
+\begin{lstlisting}
+docker swarm join --token <worker-token> 192.168.12.26:2377
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Join this physical machine (192.168.12.5) to the Docker Swarm if not already joined.
+
+\subsubsection{Prepare Required Files}
+
+Place the following files in the working directory:
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Dataset:} \texttt{Books\_rating.csv}
+    \item \textbf{MPI Scripts:} \texttt{q1\_t3.py, q2\_t3.py, q3\_t3.py, q4\_t3.py}
+\end{itemize}
+
+\subsubsection{Launch Worker Container}
 
 \vspace{0.3em}
 \noindent\textbf{Launch Worker 6:}
@@ -260,9 +352,62 @@ docker run -d --name mpi-worker6 --hostname mpi-worker6
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Single worker on the third physical machine, demonstrating the flexibility of distributing containers across different physical hosts.
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-d}: Runs container in detached mode (background)
+    \item \texttt{--name mpi-worker6}: Names the container for easy reference
+    \item \texttt{--hostname mpi-worker6}: Sets hostname for network identification
+    \item \texttt{--network 6231-net}: Connects to the overlay network
+    \item \texttt{-v "\$(pwd):/app:ro"}: Mounts current directory to /app as read-only
+    \item \texttt{mpi-node}: Uses the loaded image
+\end{itemize}
+
+\noindent\textit{Container IP:} \texttt{10.0.1.80}
+
+\vspace{0.5em}
+\noindent\textit{Explanation:} Single worker container launched on the third physical machine, demonstrating the flexibility of distributing containers across different physical hosts.
 
 \subsection{Fourth Physical Computer - Workers 7, 8, 9, 10}
+
+\subsubsection{Load Docker Image}
+
+\vspace{0.3em}
+\noindent\textbf{Transfer Image File (Execute on Master Node):}
+\begin{lstlisting}
+# On master node (192.168.12.26)
+scp mpi-node.tar user@192.168.12.3:~/
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the master node (192.168.12.26).} Transfer the \texttt{mpi-node.tar} file from the manager node to the fourth physical computer (192.168.12.3).
+
+\vspace{0.5em}
+\noindent\textbf{Load Image from Tar (Execute on Worker Node):}
+\begin{lstlisting}
+# On worker node (192.168.12.3)
+docker load -i mpi-node.tar
+\end{lstlisting}
+
+\noindent\textit{Explanation:} \textbf{This command is executed on the fourth physical computer (192.168.12.3).} Load the Docker image from the tar archive.
+
+\subsubsection{Join Docker Swarm (if not already joined)}
+
+\vspace{0.3em}
+\noindent\textbf{Join Worker to Swarm:}
+\begin{lstlisting}
+docker swarm join --token <worker-token> 192.168.12.26:2377
+\end{lstlisting}
+
+\noindent\textit{Explanation:} Join this physical machine (192.168.12.3) to the Docker Swarm if not already joined.
+
+\subsubsection{Prepare Required Files}
+
+Place the following files in the working directory:
+\begin{itemize}[leftmargin=*,itemsep=4pt]
+    \item \textbf{Dataset:} \texttt{Books\_rating.csv}
+    \item \textbf{MPI Scripts:} \texttt{q1\_t3.py, q2\_t3.py, q3\_t3.py, q4\_t3.py}
+\end{itemize}
+
+\subsubsection{Launch Worker Containers}
 
 \vspace{0.3em}
 \noindent\textbf{Launch Worker 7:}
@@ -271,12 +416,26 @@ docker run -d --name mpi-worker7 --hostname mpi-worker7
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
+\noindent\textit{Explanation - Command Parameters:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \texttt{-d}: Runs container in detached mode (background)
+    \item \texttt{--name mpi-worker7}: Names the container for easy reference
+    \item \texttt{--hostname mpi-worker7}: Sets hostname for network identification
+    \item \texttt{--network 6231-net}: Connects to the overlay network
+    \item \texttt{-v "\$(pwd):/app:ro"}: Mounts current directory to /app as read-only
+    \item \texttt{mpi-node}: Uses the loaded image
+\end{itemize}
+
+\noindent\textit{Container IP:} \texttt{10.0.1.85}
+
 \vspace{0.5em}
 \noindent\textbf{Launch Worker 8:}
 \begin{lstlisting}
 docker run -d --name mpi-worker8 --hostname mpi-worker8 
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
+
+\noindent\textit{Container IP:} \texttt{10.0.1.84}
 
 \vspace{0.5em}
 \noindent\textbf{Launch Worker 9:}
@@ -285,6 +444,8 @@ docker run -d --name mpi-worker9 --hostname mpi-worker9
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
+\noindent\textit{Container IP:} \texttt{10.0.1.65}
+
 \vspace{0.5em}
 \noindent\textbf{Launch Worker 10:}
 \begin{lstlisting}
@@ -292,7 +453,10 @@ docker run -d --name mpi-worker10 --hostname mpi-worker10
     --network 6231-net -v "$(pwd):/app:ro" mpi-node
 \end{lstlisting}
 
-\noindent\textit{Explanation:} Four workers on the fourth physical machine, completing the 10-worker setup for scalability testing.
+\noindent\textit{Container IP:} \texttt{10.0.1.67}
+
+\vspace{0.5em}
+\noindent\textit{Explanation:} Four worker containers are launched on the fourth physical machine, completing the 10-worker setup for scalability testing.
 
 \section{MPI Execution Commands}
 
